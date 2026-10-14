@@ -1,0 +1,1860 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Chinese Restaurant: Full Tycoon Workflow</title>
+    <style>
+        * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #141418;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        #canvas-container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* UI Overlay */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 2; pointer-events: none;
+            display: flex; flex-direction: column; justify-content: space-between;
+        }
+        
+        /* Top HUD */
+        .top-hud {
+            background: linear-gradient(to bottom, rgba(0,0,0,0.92), rgba(0,0,0,0));
+            padding: 14px 16px; color: #fff; pointer-events: auto; transition: opacity 0.35s;
+        }
+        .hud-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 6px;
+        }
+        .dish-title {
+            font-size: 1.1rem; font-weight: 800; color: #ffab40;
+            display: flex; align-items: center; gap: 6px;
+        }
+        .stats-badge {
+            background: rgba(255, 171, 64, 0.2); border: 1px solid #ffab40;
+            color: #ffd54f; padding: 4px 10px; border-radius: 20px;
+            font-size: 0.82rem; font-weight: bold;
+        }
+        .step-box {
+            background: rgba(255, 255, 255, 0.12); backdrop-filter: blur(8px);
+            border-left: 4px solid #ff5252; padding: 9px 12px;
+            border-radius: 8px; font-size: 0.86rem; line-height: 1.35;
+        }
+        .bars-container {
+            margin-top: 8px; display: flex; flex-direction: column; gap: 5px;
+        }
+        .bar-row { display: flex; align-items: center; font-size: 0.78rem; gap: 8px; }
+        .bar-label { width: 78px; font-weight: bold; }
+        .bar-bg {
+            flex-grow: 1; height: 9px; background: rgba(255,255,255,0.2);
+            border-radius: 5px; overflow: hidden;
+        }
+        .bar-fill { height: 100%; width: 0%; transition: width 0.2s, background-color 0.2s; }
+        
+        /* Bottom Kitchen Controls */
+        .bottom-controls {
+            background: linear-gradient(to top, rgba(0,0,0,0.95), rgba(0,0,0,0));
+            padding: 14px; pointer-events: auto;
+            display: flex; flex-direction: column; gap: 8px;
+            transition: transform 0.4s ease, opacity 0.4s ease;
+        }
+        .bottom-controls.hidden {
+            transform: translateY(120%); opacity: 0; pointer-events: none;
+        }
+        .action-row { display: flex; gap: 8px; justify-content: center; }
+        .ingredient-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px;
+        }
+        button {
+            border: none; border-radius: 11px; padding: 10px 6px;
+            font-size: 0.82rem; font-weight: 700; color: white;
+            background: #2e2e36; box-shadow: 0 4px 6px rgba(0,0,0,0.35);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 3px; cursor: pointer; transition: transform 0.1s, opacity 0.2s, background 0.2s;
+            touch-action: manipulation;
+        }
+        button:active:not(:disabled) { transform: scale(0.95); }
+        button:disabled { opacity: 0.32; cursor: not-allowed; }
+        .btn-icon { font-size: 1.3rem; }
+        
+        .btn-heat { background: #d32f2f; flex: 1; }
+        .btn-heat.active { background: #ff6d00; box-shadow: 0 0 12px #ff6d00; }
+        .btn-toss { background: #1976d2; flex: 1; }
+        .btn-close-shop { background: #455a64; padding: 5px 10px; font-size: 0.75rem; border-radius: 6px; }
+
+        /* Floating Toast */
+        #toast {
+            position: absolute; top: 36%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(0,0,0,0.9); color: #ffeb3b; padding: 11px 22px;
+            border-radius: 25px; font-weight: bold; font-size: 1rem;
+            opacity: 0; transition: opacity 0.3s; pointer-events: none; text-align: center;
+            border: 2px solid #ffeb3b; z-index: 50; white-space: nowrap;
+        }
+
+        /* Shared Modal Styling */
+        .game-modal {
+            position: absolute; left: 50%;
+            width: 92%; max-width: 420px;
+            background: rgba(22, 22, 30, 0.96);
+            backdrop-filter: blur(14px);
+            border: 2px solid #ffab40; border-radius: 20px;
+            padding: 18px; color: #fff;
+            box-shadow: 0 14px 36px rgba(0,0,0,0.75);
+            pointer-events: auto; z-index: 30;
+            transition: opacity 0.35s, transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .game-modal.center-modal {
+            top: 50%; transform: translate(-50%, -50%); text-align: center;
+        }
+        .game-modal.center-modal.hidden {
+            opacity: 0; pointer-events: none; transform: translate(-50%, -45%) scale(0.92);
+        }
+        .game-modal.bottom-modal {
+            bottom: 20px; transform: translate(-50%, 150%);
+        }
+        .game-modal.bottom-modal.show {
+            transform: translate(-50%, 0%);
+        }
+
+        /* Lobby Elements */
+        .shop-sign {
+            display: inline-block; padding: 5px 16px; border-radius: 20px;
+            font-weight: 800; font-size: 0.82rem; margin-bottom: 6px;
+            background: #c62828; color: #fff; letter-spacing: 1px;
+        }
+        .shop-sign.open { background: #2e7d32; }
+        .menu-grid {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 7px;
+            margin: 12px 0; text-align: left;
+        }
+        .menu-card {
+            background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+            padding: 7px 10px; border-radius: 10px; font-size: 0.78rem;
+            display: flex; align-items: center; gap: 7px;
+        }
+        .btn-primary-gold {
+            width: 100%; background: linear-gradient(135deg, #ff6d00, #ffab40);
+            color: #111; font-weight: 800; font-size: 1rem; padding: 13px;
+            border-radius: 12px; margin-top: 8px;
+        }
+        .btn-primary-green {
+            width: 100%; background: linear-gradient(135deg, #00c853, #64dd17);
+            color: #111; font-weight: 800; font-size: 1rem; padding: 13px;
+            border-radius: 12px; margin-top: 8px;
+        }
+
+        /* Waiter Notepad Styling */
+        .notepad-box {
+            background: #fff9c4; color: #222; border-radius: 12px;
+            padding: 14px; margin: 10px 0; text-align: left;
+            border-top: 8px solid #d32f2f; box-shadow: inset 0 0 8px rgba(0,0,0,0.1);
+            font-family: "Courier New", Courier, monospace;
+        }
+        .notepad-box h4 { margin: 0 0 6px 0; font-size: 1.05rem; color: #b71c1c; }
+        .notepad-box p { margin: 4px 0; font-size: 0.88rem; font-weight: bold; }
+
+        /* Customer Review Elements */
+        .customer-header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+        .customer-avatar {
+            width: 46px; height: 46px; border-radius: 50%;
+            background: #ffab40; display: flex; align-items: center; justify-content: center;
+            font-size: 1.5rem;
+        }
+        .customer-info h3 { margin: 0; font-size: 1.05rem; color: #ffab40; }
+        .customer-info p { margin: 2px 0 0; font-size: 0.8rem; color: #aaa; }
+        .stars-row { font-size: 1.45rem; letter-spacing: 4px; margin: 6px 0; color: #ffd700; }
+        .review-comment {
+            background: rgba(255,255,255,0.08); padding: 10px; border-radius: 10px;
+            font-size: 0.88rem; line-height: 1.4; color: #eee; font-style: italic;
+            margin-bottom: 10px;
+        }
+        .score-breakdown { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+        .score-tag {
+            font-size: 0.72rem; padding: 4px 9px; border-radius: 12px;
+            background: rgba(255,255,255,0.15); font-weight: 600;
+        }
+
+        /* Payment & Dishwashing Progress */
+        .receipt-box {
+            background: rgba(255,255,255,0.08); border-radius: 12px;
+            padding: 12px; margin: 10px 0; display: flex; justify-content: space-between;
+            align-items: center; font-size: 1rem;
+        }
+        .price-big { font-size: 1.5rem; font-weight: 900; color: #69f0ae; }
+
+        /* Account, leaderboard, nickname */
+        #shop-modal, #nick-modal { max-height: 92vh; overflow-y: auto; }
+        .account-box {
+            background: rgba(255,255,255,0.07); border-radius: 12px; padding: 10px;
+            margin: 8px 0; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+            font-size: 0.82rem; text-align: left; min-height: 48px;
+        }
+        .account-box img { width: 32px; height: 32px; border-radius: 50%; }
+        .account-box .who { flex: 1; min-width: 0; }
+        .account-box .who b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .account-box .who small { color: #aaa; }
+        .account-box .btn-logout { padding: 6px 10px; font-size: 0.72rem; background: #455a64; }
+        .leaderboard { text-align: left; margin-top: 10px; font-size: 0.8rem; }
+        .leaderboard h4 { margin: 0 0 6px; color: #ffab40; font-size: 0.9rem; }
+        .leaderboard ol { margin: 0; padding-left: 22px; }
+        .leaderboard li { display: flex; justify-content: space-between; padding: 2px 0; }
+        .leaderboard .muted { color: #888; }
+        .nick-input {
+            width: 100%; padding: 11px; border-radius: 10px; border: 1px solid #ffab40;
+            background: #111; color: #fff; font-size: 1rem; margin-top: 8px;
+        }
+        .nick-error { color: #ff8a80; font-size: 0.8rem; min-height: 1em; margin-top: 6px; }
+
+        /* Streak & patience */
+        .stats-badge.streak { display: none; }
+        .stats-badge.streak.on { display: inline-block; }
+        .bar-fill.patience { background: #ffca28; }
+        .bar-fill.patience.low { background: #d32f2f; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="ui-layer">
+    <!-- Top HUD -->
+    <div class="top-hud" id="top-hud" style="opacity: 0; pointer-events: none;">
+        <div class="hud-header">
+            <div class="dish-title" id="hud-dish-title">🥘 辣椒炒肉</div>
+            <div style="display:flex; gap:6px; align-items:center;">
+                <span class="stats-badge streak" id="hud-streak">🔥 Streak 0</span>
+                <span class="stats-badge" id="hud-earnings">💰 ¥0</span>
+                <button class="btn-close-shop" onclick="closeShop()">🏪 Close Shop</button>
+            </div>
+        </div>
+        <div class="step-box" id="recipe-prompt">Step 1: Turn on the Stove Heat!</div>
+        <div class="bars-container" id="kitchen-bars">
+            <div class="bar-row">
+                <span class="bar-label">🔥 Wok Temp</span>
+                <div class="bar-bg"><div class="bar-fill" id="temp-bar" style="background: #ff5252;"></div></div>
+            </div>
+            <div class="bar-row">
+                <span class="bar-label">👨‍🍳 Doneness</span>
+                <div class="bar-bg"><div class="bar-fill" id="cook-bar" style="background: #4caf50;"></div></div>
+            </div>
+            <div class="bar-row" id="patience-row" style="display:none;">
+                <span class="bar-label">⏳ Patience</span>
+                <div class="bar-bg"><div class="bar-fill patience" id="patience-bar"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast">Wok Hei! 🔥</div>
+
+    <!-- 1. SHOP LOBBY MODAL -->
+    <div class="game-modal center-modal" id="shop-modal">
+        <div class="shop-sign" id="shop-status-badge">CLOSED • 休息中</div>
+        <h2 style="margin: 4px 0; color: #ffab40; font-size: 1.35rem;">🏮 中华小当家 3D 大排档</h2>
+        <p style="margin: 0 0 8px; font-size: 0.82rem; color: #bbb;">
+            Full Workflow: Take Order ➔ Cook ➔ Serve ➔ Collect Cash/Card ➔ Wash Dishes!
+        </p>
+        <div class="account-box" id="account-box">
+            <div class="who"><b>Guest</b><small>Sign in to save earnings & join the leaderboard</small></div>
+            <div id="google-signin-slot"></div>
+        </div>
+        <div class="menu-grid">
+            <div class="menu-card"><span>🌶️</span><div><b>辣椒炒肉</b><br><small>¥38 • Pork & Peppers</small></div></div>
+            <div class="menu-card"><span>🍍</span><div><b>古老肉</b><br><small>¥46 • Sweet & Sour</small></div></div>
+            <div class="menu-card"><span>🐟</span><div><b>清蒸鱼</b><br><small>¥68 • Steamed Fish</small></div></div>
+            <div class="menu-card"><span>🥬</span><div><b>炒青菜</b><br><small>¥24 • Garlic Greens</small></div></div>
+            <div class="menu-card"><span>🍅</span><div><b>番茄炒蛋</b><br><small>¥30 • Tomato Egg</small></div></div>
+            <div class="menu-card"><span>🍳</span><div><b>叉烧煎蛋</b><br><small>¥42 • Char Siu Egg</small></div></div>
+        </div>
+        <button class="btn-primary-green" onclick="openShopAndSeatCustomer()">
+            🔓 Open Shop & Seat Customer (开门迎客)
+        </button>
+        <div class="leaderboard" id="leaderboard">
+            <h4>🏆 Top Earners</h4>
+            <div id="leaderboard-body"><span class="muted">Loading…</span></div>
+        </div>
+    </div>
+
+    <div class="game-modal center-modal hidden" id="nick-modal">
+        <h2 style="margin: 4px 0; color: #ffab40; font-size: 1.2rem;">Choose your nickname</h2>
+        <p style="margin: 0 0 6px; font-size: 0.82rem; color: #bbb;">This name appears on the leaderboard. You can't change it later.</p>
+        <input class="nick-input" id="nick-input" maxlength="16" placeholder="3-16 letters, digits, spaces or _" autocomplete="off">
+        <div class="nick-error" id="nick-error"></div>
+        <button class="btn-primary-green" id="btn-nick-save" onclick="saveNickname()">Save Nickname</button>
+    </div>
+
+    <!-- 2. WAITER ORDER TAKING MODAL -->
+    <div class="game-modal bottom-modal" id="waiter-modal">
+        <div class="customer-header">
+            <div class="customer-avatar" id="waiter-cust-avatar">🙋‍♂️</div>
+            <div class="customer-info">
+                <h3 id="waiter-cust-name">Uncle Chen</h3>
+                <p id="waiter-cust-status">Seated at Table 1 • Ready to Order</p>
+            </div>
+        </div>
+        <div class="notepad-box" id="waiter-notepad">
+            <h4 id="notepad-title">📝 Waiter Order Pad: [Blank]</h4>
+            <p id="notepad-dialogue">"Service! (服务员点菜!) Click below to take my order!"</p>
+        </div>
+        <button class="btn-primary-gold" id="btn-waiter-action" onclick="handleWaiterAction()">
+            📝 Write Down Customer Order (记下菜单)
+        </button>
+    </div>
+
+    <!-- 3. KITCHEN WOK CONTROLS -->
+    <div class="bottom-controls hidden" id="kitchen-controls">
+        <div class="action-row">
+            <button class="btn-heat" id="btn-heat" onclick="toggleHeat()">
+                <span class="btn-icon">🔥</span>
+                <span id="heat-text">Turn Fire ON</span>
+            </button>
+            <button class="btn-toss" id="btn-toss" onclick="tossWok()">
+                <span class="btn-icon">🍳</span>
+                <span id="toss-text">Stir / Toss Wok</span>
+            </button>
+        </div>
+        <div class="ingredient-grid">
+            <button id="btn-slot-0" onclick="useSlot(0)"><span class="btn-icon">🫗</span><span>1. Oil</span></button>
+            <button id="btn-slot-1" onclick="useSlot(1)"><span class="btn-icon">🧄</span><span>2. Item</span></button>
+            <button id="btn-slot-2" onclick="useSlot(2)"><span class="btn-icon">🥩</span><span>3. Item</span></button>
+            <button id="btn-slot-3" onclick="useSlot(3)"><span class="btn-icon">🌶️</span><span>4. Item</span></button>
+            <button id="btn-slot-4" onclick="useSlot(4)"><span class="btn-icon">🍾</span><span>5. Sauce</span></button>
+            <button id="btn-serve" onclick="serveDish()" disabled style="background: #2e7d32;">
+                <span class="btn-icon">🍽️</span><span>6. Serve Dish!</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- 4. CUSTOMER REVIEW MODAL -->
+    <div class="game-modal bottom-modal" id="review-modal">
+        <div class="customer-header">
+            <div class="customer-avatar" id="cust-avatar">😋</div>
+            <div class="customer-info">
+                <h3 id="cust-name">Customer</h3>
+                <p id="cust-status">Tasting your dish...</p>
+            </div>
+        </div>
+        <div class="stars-row" id="review-stars">⏳</div>
+        <div class="review-comment" id="review-text">
+            *Picks up chopsticks and takes a big bite...*
+        </div>
+        <div class="score-breakdown" id="score-tags"></div>
+        <button class="btn-primary-gold" id="btn-go-payment" onclick="goToPaymentPhase()" disabled>
+            💳 Proceed to Cashier Checkout (去收银台结账)
+        </button>
+    </div>
+
+    <!-- 5. CASHIER PAYMENT MODAL (CASH OR CARD) -->
+    <div class="game-modal bottom-modal" id="payment-modal">
+        <div class="customer-header">
+            <div class="customer-avatar" id="pay-icon">💵</div>
+            <div class="customer-info">
+                <h3 id="pay-title">Cashier Counter (收银台)</h3>
+                <p id="pay-subtitle">Customer wants to pay by Cash</p>
+            </div>
+        </div>
+        <div class="receipt-box">
+            <div>
+                <div style="font-size:0.8rem; color:#aaa;" id="pay-dish-name">辣椒炒肉</div>
+                <div style="font-size:0.75rem; color:#ffd54f;" id="pay-rating-bonus">5-Star Full Payment</div>
+            </div>
+            <div class="price-big" id="pay-amount">¥38</div>
+        </div>
+        <button class="btn-primary-green" id="btn-collect-pay" onclick="collectPayment()">
+            💵 Collect Cash (收取现金)
+        </button>
+    </div>
+
+    <!-- 6. DISHWASHING SINK MODAL -->
+    <div class="game-modal bottom-modal" id="wash-modal">
+        <div class="customer-header">
+            <div class="customer-avatar" style="background:#29b6f6;">🧽</div>
+            <div class="customer-info">
+                <h3>Dishwashing Station (洗碗池)</h3>
+                <p>Swipe on the 3D Plate or tap below to scrub off oil & sauce!</p>
+            </div>
+        </div>
+        <div class="bar-row" style="margin: 12px 0;">
+            <span class="bar-label" style="width:95px;">✨ Cleanliness</span>
+            <div class="bar-bg" style="height:14px;">
+                <div class="bar-fill" id="wash-bar" style="background: #29b6f6; width: 0%;"></div>
+            </div>
+        </div>
+        <div style="display:flex; gap:8px;">
+            <button class="btn-primary-gold" id="btn-scrub" onclick="scrubDish()" style="flex:2; margin-top:0;">
+                🧽 Scrub & Rinse Plate (刷洗餐盘)
+            </button>
+            <button class="btn-primary-green" id="btn-finish-order" onclick="finishWashAndNextOrder()" disabled style="flex:2; margin-top:0;">
+                🛎️ Next Customer!
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // =====================================================
+    // 1. ALL 6 CHINESE DISH RECIPES
+    // =====================================================
+    const RECIPES = {
+        lajiao: {
+            id: 'lajiao',
+            name: '辣椒炒肉 (Pork & Peppers)',
+            price: 38,
+            actionLabel: 'Stir / Toss Wok',
+            customer: { name: 'Uncle Chen (Hunan Foodie)', shirtColor: 0x1565c0, request: '"Waiter! Give me a plate of Hunan 辣椒炒肉! Dry-sear those green peppers first, then pour oil!"' },
+            steps: [
+                { icon: '🌶️', label: '1. Green Peppers', type: 'peppers', count: 14, prompt: "Add '1. Green Peppers' to dry-sear until blistered (虎皮青椒)." },
+                { icon: '🫗', label: '2. Cooking Oil', type: 'oil', liquidColor: 0xffd54f, prompt: "Pour '2. Cooking Oil' into the hot wok!" },
+                { icon: '🧄', label: '3. Garlic & Douchi', type: 'garlic', count: 12, prompt: "Add '3. Garlic & Douchi' for savory aroma." },
+                { icon: '🥩', label: '4. Sliced Pork', type: 'pork', count: 14, unlockServe: true, prompt: "Add '4. Sliced Pork' and toss to render fat!" },
+                { icon: '🍾', label: '5. Soy Sauce', type: 'sauce', sauceColor: 0x4e2712, prompt: "Splash '5. Soy Sauce' for Wok Hei!" }
+            ],
+            praise: "太下饭了! The blistered green peppers soaked up the pork fat and rich soy glaze!"
+        },
+        gulaorou: {
+            id: 'gulaorou',
+            name: '古老肉 (Sweet & Sour Pork)',
+            price: 46,
+            actionLabel: 'Toss & Coat Glaze',
+            customer: { name: 'Auntie Mei (Cantonese Critic)', shirtColor: 0xad1457, request: '"Waiter! I would like 古老肉 (Sweet & Sour Pork) with pineapple and bell peppers!"' },
+            steps: [
+                { icon: '🫗', label: '1. Cooking Oil', type: 'oil', liquidColor: 0xffca28, prompt: "Pour '1. Cooking Oil' to heat up the wok for frying!" },
+                { icon: '🍖', label: '2. Crispy Pork', type: 'crispy_pork', count: 13, unlockServe: true, prompt: "Add '2. Crispy Pork' nuggets to fry until golden!" },
+                { icon: '🫑', label: '3. Bell Peppers', type: 'bell_peppers', count: 10, prompt: "Toss in '3. Bell Peppers' (red & green chunks)." },
+                { icon: '🍍', label: '4. Pineapple', type: 'pineapple', count: 10, prompt: "Add '4. Pineapple' chunks for fruity tang!" },
+                { icon: '🍯', label: '5. Sweet & Sour', type: 'sauce', sauceColor: 0xd84315, prompt: "Pour '5. Sweet & Sour' glaze and toss to coat!" }
+            ],
+            praise: "酸甜酥脆! Crispy outside, tender inside, and the sweet-and-sour pineapple glaze is spot on!"
+        },
+        zhengyu: {
+            id: 'zhengyu',
+            name: '清蒸鱼 (Steamed Fish)',
+            price: 68,
+            actionLabel: 'Steam / Baste Fish',
+            customer: { name: 'Boss Wong (Seafood Lover)', shirtColor: 0x00695c, request: '"Waiter! Bring me a fresh 清蒸鱼 (Steamed Whole Fish) with ginger, scallions, and sizzling oil!"' },
+            steps: [
+                { icon: '💧', label: '1. Steam Water', type: 'oil', liquidColor: 0x81d4fa, prompt: "Pour '1. Steam Water' into the wok to generate hot steam!" },
+                { icon: '🐟', label: '2. Whole Fish', type: 'whole_fish', count: 1, unlockServe: true, prompt: "Place '2. Whole Fish' into the wok to steam!" },
+                { icon: '🫚', label: '3. Ginger & Scallion', type: 'ginger_scallion', count: 14, prompt: "Top with '3. Ginger & Scallion' shreds for freshness!" },
+                { icon: '🫗', label: '4. Sizzling Oil', type: 'hot_oil', liquidColor: 0xffd54f, prompt: "Pour '4. Sizzling Oil' (泼热油) over the scallions!" },
+                { icon: '🍾', label: '5. Steamed Fish Soy', type: 'sauce', sauceColor: 0x5d2906, prompt: "Drizzle '5. Steamed Fish Soy' (蒸鱼豉油) and steam to 100%!" }
+            ],
+            praise: "鲜掉眉毛! The steamed fish is silky tender, and the sizzling oil over scallions unlocked incredible aroma!"
+        },
+        chaoqingcai: {
+            id: 'chaoqingcai',
+            name: '炒青菜 (Garlic Bok Choy)',
+            price: 24,
+            actionLabel: 'Quick Wok Toss',
+            customer: { name: 'Miss Lin (Healthy Diner)', shirtColor: 0x2e7d32, request: '"Waiter! One plate of 炒青菜 (Garlic Bok Choy)—make sure you put hot oil so it stays bright green!"' },
+            steps: [
+                { icon: '🫗', label: '1. Cooking Oil', type: 'oil', liquidColor: 0xffd54f, prompt: "Pour '1. Cooking Oil' so the greens turn glossy and bright!" },
+                { icon: '🧄', label: '2. Minced Garlic', type: 'garlic_only', count: 10, prompt: "Add '2. Minced Garlic' to infuse the oil!" },
+                { icon: '🥬', label: '3. Baby Bok Choy', type: 'bok_choy', count: 14, unlockServe: true, prompt: "Toss in '3. Baby Bok Choy' over high heat!" },
+                { icon: '🧂', label: '4. Salt & Pinch Sugar', type: 'salt', count: 8, prompt: "Sprinkle '4. Salt & Pinch Sugar' to keep the greens vibrant!" },
+                { icon: '🦪', label: '5. Oyster Sauce', type: 'sauce', sauceColor: 0x4a2511, prompt: "Add a touch of '5. Oyster Sauce' and toss until crisp-tender!" }
+            ],
+            praise: "清脆爽口! The bok choy is emerald green, crisp, and coated in fragrant garlic oil!"
+        },
+        fanqie: {
+            id: 'fanqie',
+            name: '番茄炒蛋 (Tomato Stir-Fry Egg)',
+            price: 30,
+            actionLabel: 'Scramble & Toss',
+            customer: { name: 'Xiao Ming (Student)', shirtColor: 0xf57f17, request: '"Waiter! I want 番茄炒蛋 (Tomato Stir-Fried Eggs) with plenty of sweet-savory gravy for my rice!"' },
+            steps: [
+                { icon: '🫗', label: '1. Cooking Oil', type: 'oil', liquidColor: 0xffd54f, prompt: "Pour '1. Cooking Oil'—eggs love hot oil!" },
+                { icon: '🥚', label: '2. Whisked Eggs', type: 'scrambled_egg', count: 14, prompt: "Pour '2. Whisked Eggs' to puff up into golden clouds!" },
+                { icon: '🍅', label: '3. Fresh Tomatoes', type: 'tomato', count: 14, unlockServe: true, prompt: "Add '3. Fresh Tomatoes' wedges and stir-fry until juicy!" },
+                { icon: '🌱', label: '4. Green Scallions', type: 'scallions', count: 12, prompt: "Toss in '4. Green Scallions' for aroma!" },
+                { icon: '🧂', label: '5. Sweet Tomato Glaze', type: 'sauce', sauceColor: 0xe53935, prompt: "Season with '5. Sweet Tomato Glaze' to make rich gravy!" }
+            ],
+            praise: "国民神菜! Fluffy eggs soaked in rich, tangy-sweet tomato gravy—I ate every single grain of rice!"
+        },
+        chashao: {
+            id: 'chashao',
+            name: '叉烧煎蛋 (Char Siu Fried Egg)',
+            price: 42,
+            actionLabel: 'Pan-Sear & Baste',
+            customer: { name: 'Ah Keung (HK Cafe Regular)', shirtColor: 0x6a1b9a, request: '"Waiter! One 叉烧煎蛋 (Char Siu with Sunny-Side-Up Eggs) and sweet soy glaze please!"' },
+            steps: [
+                { icon: '🫗', label: '1. Cooking Oil', type: 'oil', liquidColor: 0xffd54f, prompt: "Pour '1. Cooking Oil' into the hot wok so the eggs get crispy edges!" },
+                { icon: '🥩', label: '2. Honey Char Siu', type: 'charsiu', count: 12, prompt: "Lay in '2. Honey Char Siu' (BBQ Pork slices) to caramelize!" },
+                { icon: '🍳', label: '3. Sunny Eggs', type: 'sunny_egg', count: 3, unlockServe: true, prompt: "Crack in '3. Sunny Eggs' for golden runny yolks!" },
+                { icon: '🌱', label: '4. Chopped Scallion', type: 'scallions', count: 12, prompt: "Sprinkle '4. Chopped Scallion' on top!" },
+                { icon: '🍾', label: '5. Sweet Soy Glaze', type: 'sauce', sauceColor: 0x3e1f0d, prompt: "Drizzle '5. Sweet Soy Glaze' (豉油皇) around the sizzling eggs!" }
+            ],
+            praise: "黯然销魂! Caramelized Char Siu with crispy-edged runny fried eggs and sweet soy over hot rice!"
+        }
+    };
+
+    const RECIPE_KEYS = Object.keys(RECIPES);
+
+    // =====================================================
+    // 2. THREE.JS SCENE & 5 CAMERA STATIONS
+    // =====================================================
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x181820);
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 120);
+    
+    // 5 Camera Viewpoints across the 3D Restaurant
+    const CAM_VIEWS = {
+        lobby:   { pos: new THREE.Vector3(18, 12, 18),  look: new THREE.Vector3(18, 1, 0) },
+        kitchen: { pos: new THREE.Vector3(0, 8.5, 9.5), look: new THREE.Vector3(0, 0.5, 0) },
+        dining:  { pos: new THREE.Vector3(18, 5.2, 7.8), look: new THREE.Vector3(18, 1.3, -0.5) },
+        cashier: { pos: new THREE.Vector3(34, 5.5, 7.2), look: new THREE.Vector3(34, 1.0, 0) },
+        sink:    { pos: new THREE.Vector3(50, 6.2, 6.8), look: new THREE.Vector3(50, 0.8, 0) }
+    };
+
+    const currentCamPos = CAM_VIEWS.lobby.pos.clone();
+    const currentLookAt = CAM_VIEWS.lobby.look.clone();
+    camera.position.copy(currentCamPos);
+    camera.lookAt(currentLookAt);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    container.appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfff5e6, 0.85);
+    dirLight.position.set(20, 18, 12);
+    dirLight.castShadow = true;
+    scene.add(dirLight);
+
+    const fireLight = new THREE.PointLight(0xff4500, 0, 8);
+    fireLight.position.set(0, -0.5, 0);
+    scene.add(fireLight);
+
+    // =====================================================
+    // 3. BUILD 3D STATIONS: KITCHEN, DINING, CASHIER, SINK
+    // =====================================================
+    // --- STATION A: KITCHEN STOVE (X = 0) ---
+    const counterMat = new THREE.MeshStandardMaterial({ color: 0x2b2b2b, roughness: 0.8 });
+    const kitchenCounter = new THREE.Mesh(new THREE.BoxGeometry(14, 1, 14), counterMat);
+    kitchenCounter.position.set(0, -1.2, 0);
+    kitchenCounter.receiveShadow = true;
+    scene.add(kitchenCounter);
+
+    const burner = new THREE.Mesh(
+        new THREE.TorusGeometry(1.6, 0.2, 16, 32),
+        new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.8 })
+    );
+    burner.rotation.x = Math.PI / 2;
+    burner.position.y = -0.6;
+    scene.add(burner);
+
+    const flameMat = new THREE.MeshBasicMaterial({ color: 0xff3300, transparent: true, opacity: 0 });
+    const flameRing = new THREE.Mesh(new THREE.TorusGeometry(1.4, 0.12, 16, 32), flameMat);
+    flameRing.rotation.x = Math.PI / 2;
+    flameRing.position.y = -0.45;
+    scene.add(flameRing);
+
+    const wokGroup = new THREE.Group();
+    scene.add(wokGroup);
+
+    const wokRadius = 3.2;
+    const wokMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(wokRadius, 32, 16, 0, Math.PI * 2, Math.PI * 0.55, Math.PI * 0.45),
+        new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.65, roughness: 0.4, side: THREE.DoubleSide })
+    );
+    wokMesh.position.y = wokRadius - 0.5;
+    wokMesh.castShadow = true;
+    wokMesh.receiveShadow = true;
+    wokGroup.add(wokMesh);
+
+    const handleMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.22, 0.28, 3.2, 16),
+        new THREE.MeshStandardMaterial({ color: 0x8d5524, roughness: 0.7 })
+    );
+    handleMesh.rotation.z = Math.PI / 2.6;
+    handleMesh.position.set(-4.0, 2.2, 0);
+    wokGroup.add(handleMesh);
+
+    const oilMat = new THREE.MeshStandardMaterial({ color: 0xffd54f, transparent: true, opacity: 0.85, roughness: 0.05 });
+    const oilPool = new THREE.Mesh(new THREE.CircleGeometry(1.65, 32), oilMat);
+    oilPool.rotation.x = -Math.PI / 2;
+    oilPool.position.y = 0.05;
+    oilPool.scale.set(0.01, 0.01, 0.01);
+    oilPool.visible = false;
+    wokGroup.add(oilPool);
+
+    const spatulaGroup = new THREE.Group();
+    const spatMetalMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.9, roughness: 0.2 });
+    const spatShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.5), spatMetalMat);
+    spatShaft.position.y = 1.75;
+    spatulaGroup.add(spatShaft);
+    const spatBlade = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.06, 0.8), spatMetalMat);
+    spatBlade.rotation.x = 0.3;
+    spatulaGroup.add(spatBlade);
+    spatulaGroup.position.set(1.2, 0.6, 0);
+    spatulaGroup.rotation.z = -0.7;
+    wokGroup.add(spatulaGroup);
+
+    // --- STATION B: DINING TABLE & CUSTOMER (X = 18) ---
+    const diningGroup = new THREE.Group();
+    diningGroup.position.set(18, 0, 0);
+    scene.add(diningGroup);
+
+    const tableMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(3.8, 3.8, 0.3, 32),
+        new THREE.MeshStandardMaterial({ color: 0x6d4c41, roughness: 0.6 })
+    );
+    tableMesh.position.y = -0.2;
+    tableMesh.receiveShadow = true;
+    diningGroup.add(tableMesh);
+
+    // Waiter 3D Order Notepad on Table
+    const waiterPadGroup = new THREE.Group();
+    waiterPadGroup.position.set(-1.5, 0.1, 1.2);
+    diningGroup.add(waiterPadGroup);
+    const padBoard = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 0.08, 1.5),
+        new THREE.MeshStandardMaterial({ color: 0x5d4037 })
+    );
+    const padPaper = new THREE.Mesh(
+        new THREE.BoxGeometry(0.95, 0.09, 1.3),
+        new THREE.MeshStandardMaterial({ color: 0xfff9c4 })
+    );
+    waiterPadGroup.add(padBoard, padPaper);
+
+    // Serving Porcelain Plate (Moves from Dining Table to Sink for washing!)
+    const plateGroup = new THREE.Group();
+    plateGroup.position.set(0, 0.05, 0.6);
+    diningGroup.add(plateGroup);
+
+    const plateMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.75, 1.25, 0.22, 32),
+        new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.15 })
+    );
+    plateGroup.add(plateMesh);
+
+    const plateSauceMat = new THREE.MeshStandardMaterial({ color: 0x4e2712, transparent: true, opacity: 0.85 });
+    const plateSauce = new THREE.Mesh(new THREE.CircleGeometry(1.3, 32), plateSauceMat);
+    plateSauce.rotation.x = -Math.PI / 2;
+    plateSauce.position.y = 0.12;
+    plateSauce.visible = false;
+    plateGroup.add(plateSauce);
+
+    // Rice Bowl
+    const riceBowlGroup = new THREE.Group();
+    riceBowlGroup.position.set(2.1, 0.25, 0.2);
+    diningGroup.add(riceBowlGroup);
+    riceBowlGroup.add(new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.4, 0.55, 24), new THREE.MeshStandardMaterial({ color: 0x1e88e5 })));
+    const riceMesh = new THREE.Mesh(new THREE.SphereGeometry(0.6, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+    riceMesh.position.y = 0.22;
+    riceBowlGroup.add(riceMesh);
+
+    // 3D Customer
+    const customerGroup = new THREE.Group();
+    customerGroup.position.set(0, 0, -2.5);
+    diningGroup.add(customerGroup);
+
+    const shirtMat = new THREE.MeshStandardMaterial({ color: 0x1565c0, roughness: 0.7 });
+    const torsoMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 1.0, 2.4, 16), shirtMat);
+    torsoMesh.position.y = 1.1;
+    customerGroup.add(torsoMesh);
+
+    const headGroup = new THREE.Group();
+    headGroup.position.set(0, 2.9, 0);
+    customerGroup.add(headGroup);
+    headGroup.add(new THREE.Mesh(new THREE.SphereGeometry(0.82, 24, 24), new THREE.MeshStandardMaterial({ color: 0xffccaa, roughness: 0.5 })));
+
+    const hairMesh = new THREE.Mesh(new THREE.SphereGeometry(0.85, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55), new THREE.MeshStandardMaterial({ color: 0x1a1a1a }));
+    hairMesh.position.y = 0.08;
+    headGroup.add(hairMesh);
+
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+    const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 12), eyeMat);
+    leftEye.position.set(-0.28, 0.1, 0.75);
+    const rightEye = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 12), eyeMat);
+    rightEye.position.set(0.28, 0.1, 0.75);
+    headGroup.add(leftEye, rightEye);
+
+    const mouthMesh = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.045, 8, 16, Math.PI), new THREE.MeshBasicMaterial({ color: 0x882222 }));
+    mouthMesh.position.set(0, -0.2, 0.76);
+    mouthMesh.rotation.z = Math.PI;
+    headGroup.add(mouthMesh);
+
+    const armGroup = new THREE.Group();
+    armGroup.position.set(-1.05, 1.9, 0.2);
+    customerGroup.add(armGroup);
+    const armMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.18, 1.6, 12), shirtMat);
+    armMesh.rotation.x = Math.PI / 2.5;
+    armMesh.position.set(0, -0.3, 0.6);
+    armGroup.add(armMesh);
+
+    const stick1 = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.035, 1.4), new THREE.MeshStandardMaterial({ color: 0x5d4037 }));
+    stick1.rotation.x = Math.PI / 2.2;
+    stick1.position.set(0.05, -0.65, 1.5);
+    const stick2 = stick1.clone();
+    stick2.position.x = -0.05;
+    armGroup.add(stick1, stick2);
+
+    // --- STATION C: CASHIER COUNTER (X = 34) ---
+    const cashierGroup = new THREE.Group();
+    cashierGroup.position.set(34, 0, 0);
+    scene.add(cashierGroup);
+
+    const cashierDesk = new THREE.Mesh(
+        new THREE.BoxGeometry(8, 1.2, 6),
+        new THREE.MeshStandardMaterial({ color: 0x4e342e, roughness: 0.6 })
+    );
+    cashierDesk.position.y = -0.6;
+    cashierGroup.add(cashierDesk);
+
+    // Cash Register / POS Machine
+    const registerBase = new THREE.Mesh(
+        new THREE.BoxGeometry(2.2, 0.8, 1.8),
+        new THREE.MeshStandardMaterial({ color: 0x37474f, metalness: 0.5 })
+    );
+    registerBase.position.set(-1.2, 0.4, -0.5);
+    cashierGroup.add(registerBase);
+
+    const registerScreen = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6, 1.1, 0.2),
+        new THREE.MeshStandardMaterial({ color: 0x263238 })
+    );
+    registerScreen.position.set(-1.2, 1.2, -0.9);
+    cashierGroup.add(registerScreen);
+
+    // 3D Cash Banknotes Stack (Shown when paying by Cash)
+    const cashNotesGroup = new THREE.Group();
+    cashNotesGroup.position.set(1.2, 0.25, 0.6);
+    cashierGroup.add(cashNotesGroup);
+    for (let i = 0; i < 3; i++) {
+        const note = new THREE.Mesh(
+            new THREE.BoxGeometry(1.7, 0.04, 0.85),
+            new THREE.MeshStandardMaterial({ color: 0xef5350 }) // Red 100 RMB / MYR style bill
+        );
+        note.position.y = i * 0.06;
+        note.rotation.y = (i - 1) * 0.12;
+        cashNotesGroup.add(note);
+    }
+
+    // 3D Credit Card + Card Reader (Shown when paying by Card)
+    const cardPaymentGroup = new THREE.Group();
+    cardPaymentGroup.position.set(1.2, 0.3, 0.6);
+    cashierGroup.add(cardPaymentGroup);
+
+    const posTerminal = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 0.4, 1.6),
+        new THREE.MeshStandardMaterial({ color: 0x212121 })
+    );
+    cardPaymentGroup.add(posTerminal);
+
+    const creditCardMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(1.3, 0.04, 0.85),
+        new THREE.MeshStandardMaterial({ color: 0xffca28, metalness: 0.7, roughness: 0.2 })
+    );
+    creditCardMesh.position.set(0.6, 0.65, 0.3);
+    creditCardMesh.rotation.z = -0.3;
+    cardPaymentGroup.add(creditCardMesh);
+
+    // --- STATION D: DISHWASHING SINK (X = 50) ---
+    const sinkGroup = new THREE.Group();
+    sinkGroup.position.set(50, 0, 0);
+    scene.add(sinkGroup);
+
+    const sinkCounter = new THREE.Mesh(
+        new THREE.BoxGeometry(9, 1.2, 7),
+        new THREE.MeshStandardMaterial({ color: 0x607d8b, metalness: 0.5, roughness: 0.4 })
+    );
+    sinkCounter.position.y = -0.6;
+    sinkGroup.add(sinkCounter);
+
+    // Water Basin
+    const basinWater = new THREE.Mesh(
+        new THREE.CylinderGeometry(2.3, 2.0, 0.2, 32),
+        new THREE.MeshStandardMaterial({ color: 0x29b6f6, transparent: true, opacity: 0.75, roughness: 0.1 })
+    );
+    basinWater.position.y = 0.05;
+    sinkGroup.add(basinWater);
+
+    // Faucet
+    const faucetPipe = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.14, 0.14, 2.2),
+        new THREE.MeshStandardMaterial({ color: 0xe0e0e0, metalness: 0.9, roughness: 0.1 })
+    );
+    faucetPipe.position.set(0, 1.1, -2.2);
+    sinkGroup.add(faucetPipe);
+
+    const faucetSpout = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.12, 0.12, 1.4),
+        new THREE.MeshStandardMaterial({ color: 0xe0e0e0, metalness: 0.9, roughness: 0.1 })
+    );
+    faucetSpout.rotation.x = Math.PI / 2;
+    faucetSpout.position.set(0, 2.1, -1.6);
+    sinkGroup.add(faucetSpout);
+
+    // 3D Scrubbing Sponge
+    const spongeGroup = new THREE.Group();
+    spongeGroup.position.set(1.2, 0.6, 0.5);
+    sinkGroup.add(spongeGroup);
+    const spongeYellow = new THREE.Mesh(
+        new THREE.BoxGeometry(0.95, 0.3, 0.65),
+        new THREE.MeshStandardMaterial({ color: 0xffeb3b, roughness: 0.8 })
+    );
+    const spongeGreen = new THREE.Mesh(
+        new THREE.BoxGeometry(0.95, 0.12, 0.65),
+        new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.9 })
+    );
+    spongeGreen.position.y = 0.2;
+    spongeGroup.add(spongeYellow, spongeGreen);
+
+    // Dirty Plate Stains inside Sink
+    const dirtyPlateGroup = new THREE.Group();
+    dirtyPlateGroup.position.set(0, 0.18, 0);
+    sinkGroup.add(dirtyPlateGroup);
+
+    const sinkPlateMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.75, 1.25, 0.22, 32),
+        new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.15 })
+    );
+    dirtyPlateGroup.add(sinkPlateMesh);
+
+    const sinkStainMat = new THREE.MeshStandardMaterial({ color: 0x5d2906, transparent: true, opacity: 0.9, roughness: 0.4 });
+    const sinkStainMesh = new THREE.Mesh(new THREE.CircleGeometry(1.35, 24), sinkStainMat);
+    sinkStainMesh.rotation.x = -Math.PI / 2;
+    sinkStainMesh.position.y = 0.12;
+    dirtyPlateGroup.add(sinkStainMesh);
+
+    // Soap Bubbles & Smoke Particles
+    const particles = [];
+    const smokeGeo = new THREE.SphereGeometry(0.24, 8, 8);
+    const smokeMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35 });
+    const bubbleMat = new THREE.MeshStandardMaterial({ color: 0xe1f5fe, transparent: true, opacity: 0.75, roughness: 0.05 });
+
+    function spawnSmoke(xOffset = 0, isBubble = false) {
+        const mat = isBubble ? bubbleMat.clone() : smokeMat.clone();
+        const p = new THREE.Mesh(smokeGeo, mat);
+        const spread = isBubble ? 1.5 : 2.2;
+        p.position.set(xOffset + (Math.random() - 0.5) * spread, 0.4, (Math.random() - 0.5) * spread);
+        if (isBubble) p.scale.setScalar(0.5 + Math.random() * 0.7);
+        scene.add(p);
+        particles.push({ mesh: p, life: 1.0, isBubble });
+    }
+
+    // =====================================================
+    // 4. PROCEDURAL 3D FOOD MODELS FOR ALL 6 DISHES
+    // =====================================================
+    function build3DFoodModel(type) {
+        const group = new THREE.Group();
+        let colorMesh = null;
+
+        if (type === 'peppers') {
+            colorMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.22, 0.75, 8), new THREE.MeshStandardMaterial({ color: 0x4caf50, roughness: 0.5 }));
+            colorMesh.rotation.z = Math.PI / 2;
+            group.add(colorMesh);
+        } else if (type === 'garlic' || type === 'garlic_only') {
+            const isDouchi = (type === 'garlic') && Math.random() > 0.5;
+            colorMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(isDouchi ? 0.11 : 0.15), new THREE.MeshStandardMaterial({ color: isDouchi ? 0x1a1110 : 0xfff9c4 }));
+            group.add(colorMesh);
+        } else if (type === 'pork') {
+            colorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.08, 0.42), new THREE.MeshStandardMaterial({ color: 0xff8a80, roughness: 0.4 }));
+            group.add(colorMesh);
+        } else if (type === 'crispy_pork') {
+            colorMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.28, 1), new THREE.MeshStandardMaterial({ color: 0xffcc80, roughness: 0.6 }));
+            group.add(colorMesh);
+        } else if (type === 'bell_peppers') {
+            const isRed = Math.random() > 0.45;
+            colorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.08, 0.45), new THREE.MeshStandardMaterial({ color: isRed ? 0xe53935 : 0x43a047 }));
+            group.add(colorMesh);
+        } else if (type === 'pineapple') {
+            colorMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.2, 6), new THREE.MeshStandardMaterial({ color: 0xffeb3b }));
+            group.add(colorMesh);
+        } else if (type === 'whole_fish') {
+            colorMesh = new THREE.Mesh(new THREE.SphereGeometry(0.62, 24, 16), new THREE.MeshStandardMaterial({ color: 0xb0bec5, roughness: 0.35, metalness: 0.2 }));
+            colorMesh.scale.set(2.4, 0.38, 0.85);
+            group.add(colorMesh);
+            const tail = new THREE.Mesh(new THREE.ConeGeometry(0.48, 0.7, 4), new THREE.MeshStandardMaterial({ color: 0x90a4ae }));
+            tail.rotation.z = -Math.PI / 2;
+            tail.scale.set(1, 1, 0.25);
+            tail.position.set(-1.55, 0, 0);
+            group.add(tail);
+            const eye = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), new THREE.MeshBasicMaterial({ color: 0x111111 }));
+            eye.position.set(1.05, 0.18, 0.25);
+            group.add(eye);
+        } else if (type === 'ginger_scallion' || type === 'scallions') {
+            const isGinger = (type === 'ginger_scallion') && Math.random() > 0.55;
+            colorMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.65, 6), new THREE.MeshStandardMaterial({ color: isGinger ? 0xffe082 : 0x66bb6a }));
+            colorMesh.rotation.z = Math.PI / 2;
+            group.add(colorMesh);
+        } else if (type === 'bok_choy') {
+            const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 0.45, 8), new THREE.MeshStandardMaterial({ color: 0xe8f5e9 }));
+            stem.rotation.z = Math.PI / 2;
+            stem.position.x = -0.2;
+            group.add(stem);
+            colorMesh = new THREE.Mesh(new THREE.SphereGeometry(0.26, 12, 8), new THREE.MeshStandardMaterial({ color: 0x2e7d32 }));
+            colorMesh.scale.set(1.3, 0.25, 0.9);
+            colorMesh.position.x = 0.2;
+            group.add(colorMesh);
+        } else if (type === 'salt') {
+            colorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.09, 0.09), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            group.add(colorMesh);
+        } else if (type === 'scrambled_egg') {
+            colorMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.28, 1), new THREE.MeshStandardMaterial({ color: 0xffeb3b }));
+            colorMesh.scale.set(1.2, 0.6, 1.0);
+            group.add(colorMesh);
+        } else if (type === 'tomato') {
+            colorMesh = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 12), new THREE.MeshStandardMaterial({ color: 0xe53935 }));
+            colorMesh.scale.set(1.1, 0.65, 0.8);
+            group.add(colorMesh);
+        } else if (type === 'charsiu') {
+            colorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.11, 0.48), new THREE.MeshStandardMaterial({ color: 0x8d2323 }));
+            group.add(colorMesh);
+        } else if (type === 'sunny_egg') {
+            colorMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.62, 0.07, 20), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            group.add(colorMesh);
+            const yolk = new THREE.Mesh(new THREE.SphereGeometry(0.24, 16, 12), new THREE.MeshStandardMaterial({ color: 0xff9800, roughness: 0.15 }));
+            yolk.scale.set(1, 0.55, 1);
+            yolk.position.y = 0.05;
+            group.add(yolk);
+        }
+
+        return { group, colorMesh };
+    }
+
+    // =====================================================
+    // 5. FULL RESTAURANT WORKFLOW STATE & FUNCTIONS
+    // =====================================================
+    let state = {
+        mode: 'lobby', // 'lobby', 'waiter', 'kitchen', 'dining', 'cashier', 'sink'
+        earnings: 0,
+        currentRecipe: RECIPES.lajiao,
+        lastDishId: null,
+        orderWritten: false,
+        fireOn: false,
+        temp: 0,
+        stepIndex: 0,
+        cookProgress: 0,
+        usedSlots: [false, false, false, false, false],
+        hasOil: false,
+        hasSauce: false,
+        oilTargetScale: 0.01,
+        wokTossAnim: 0,
+        customerReaction: 'waiting',
+        lastStars: 5,
+        pendingPay: null,
+        pendingOrderId: null,
+        streak: 0,
+        user: null,
+        patienceEndsAt: 0,
+        paymentMethod: 'cash', // 'cash' or 'card'
+        paymentAnim: 0,
+        washProgress: 0,
+        spongeAnim: 0,
+        ingredients: []
+    };
+
+    const promptEl = document.getElementById('recipe-prompt');
+    const tempBar = document.getElementById('temp-bar');
+    const cookBar = document.getElementById('cook-bar');
+    const toastEl = document.getElementById('toast');
+
+    function showToast(msg) {
+        toastEl.innerText = msg;
+        toastEl.style.opacity = 1;
+        setTimeout(() => { toastEl.style.opacity = 0; }, 1600);
+    }
+
+    // --- STAGE 1: OPEN SHOP & WAITER TAKES ORDER ---
+    function openShopAndSeatCustomer() {
+        clearWokAndPlate();
+        const available = RECIPE_KEYS.filter(k => k !== state.lastDishId);
+        const randomKey = available[Math.floor(Math.random() * available.length)];
+        state.lastDishId = randomKey;
+        state.currentRecipe = RECIPES[randomKey];
+        state.orderWritten = false;
+
+        const r = state.currentRecipe;
+        shirtMat.color.setHex(r.customer.shirtColor);
+        mouthMesh.rotation.z = Math.PI;
+        state.customerReaction = 'waiting';
+        waiterPadGroup.visible = true;
+
+        // Hide Lobby, Pan to Dining Table for Waiter Order Taking
+        document.getElementById('shop-modal').classList.add('hidden');
+        document.getElementById('top-hud').style.opacity = '1';
+        document.getElementById('top-hud').style.pointerEvents = 'auto';
+        document.getElementById('kitchen-bars').style.display = 'none';
+        document.getElementById('hud-dish-title').innerText = `📝 Table 1 • Waiter Service`;
+        promptEl.innerText = "Walk up to the customer and write down their order on your waiter pad!";
+
+        document.getElementById('waiter-cust-name').innerText = r.customer.name;
+        document.getElementById('waiter-cust-avatar').innerText = '🙋‍♂️';
+        document.getElementById('notepad-title').innerText = `📝 Waiter Order Pad: [Blank]`;
+        document.getElementById('notepad-dialogue').innerText = r.customer.request;
+
+        const btn = document.getElementById('btn-waiter-action');
+        btn.innerText = "📝 Write Down Customer Order (记下菜单)";
+        btn.className = "btn-primary-gold";
+
+        state.mode = 'dining';
+        document.getElementById('waiter-modal').classList.add('show');
+    }
+
+    function handleWaiterAction() {
+        const r = state.currentRecipe;
+        const btn = document.getElementById('btn-waiter-action');
+
+        if (!state.orderWritten) {
+            state.orderWritten = true;
+            document.getElementById('waiter-cust-avatar').innerText = '😊';
+            document.getElementById('notepad-title').innerText = `✅ Order Ticket #108: ${r.name} (¥${r.price})`;
+            document.getElementById('notepad-dialogue').innerText = `"Got it! One ${r.name}, coming right up!"`;
+            showToast(`Order Written: ${r.name}! 📝`);
+            btn.innerText = "👨‍🍳 Head to Kitchen & Start Cooking! (进厨房炒菜)";
+            btn.className = "btn-primary-green";
+        } else {
+            document.getElementById('waiter-modal').classList.remove('show');
+            waiterPadGroup.visible = false;
+            startCookingOrder();
+        }
+    }
+
+    // --- STAGE 2: KITCHEN WOK COOKING ---
+    function startCookingOrder() {
+        state.mode = 'kitchen';
+        const r = state.currentRecipe;
+
+        document.getElementById('kitchen-bars').style.display = 'flex';
+        document.getElementById('kitchen-controls').classList.remove('hidden');
+        document.getElementById('hud-dish-title').innerText = `🥘 ${r.name}`;
+        document.getElementById('toss-text').innerText = r.actionLabel;
+        state.patienceEndsAt = Date.now() + PATIENCE_MS;
+        document.getElementById('patience-row').style.display = 'flex';
+
+        r.steps.forEach((stepObj, idx) => {
+            const btn = document.getElementById(`btn-slot-${idx}`);
+            btn.disabled = false;
+            btn.innerHTML = `<span class="btn-icon">${stepObj.icon}</span><span>${stepObj.label}</span>`;
+        });
+        document.getElementById('btn-serve').disabled = true;
+
+        updateRecipePrompt();
+        showToast(`Cooking: ${r.name}! 🔥`);
+    }
+
+    function clearWokAndPlate() {
+        state.ingredients.forEach(item => {
+            wokGroup.remove(item.group);
+            plateGroup.remove(item.group);
+        });
+        state.ingredients = [];
+        state.fireOn = false;
+        state.temp = 0;
+        state.stepIndex = 0;
+        state.cookProgress = 0;
+        state.usedSlots = [false, false, false, false, false];
+        state.hasOil = false;
+        state.hasSauce = false;
+        state.oilTargetScale = 0.01;
+
+        oilPool.visible = false;
+        oilPool.scale.set(0.01, 0.01, 0.01);
+        plateGroup.visible = true;
+        plateSauce.visible = false;
+
+        flameMat.opacity = 0;
+        fireLight.intensity = 0;
+        document.getElementById('btn-heat').classList.remove('active');
+        document.getElementById('heat-text').innerText = "Turn Fire ON";
+        tempBar.style.width = '0%';
+        cookBar.style.width = '0%';
+        cookBar.style.backgroundColor = '#4caf50';
+        clearTimeout(reviewTimer);
+        clearTimeout(payTimer);
+        clearTimeout(walkTimer);
+        state.patienceEndsAt = 0;
+        document.getElementById('patience-row').style.display = 'none';
+        document.getElementById('btn-serve').disabled = true;
+        document.getElementById('btn-go-payment').disabled = true;
+        document.getElementById('btn-collect-pay').disabled = false;
+    }
+
+    function toggleHeat() {
+        state.fireOn = !state.fireOn;
+        const btn = document.getElementById('btn-heat');
+        const txt = document.getElementById('heat-text');
+        if (state.fireOn) {
+            btn.classList.add('active');
+            txt.innerText = "Fire: HIGH 🔥";
+            flameMat.opacity = 0.9;
+            fireLight.intensity = 2.5;
+        } else {
+            btn.classList.remove('active');
+            txt.innerText = "Turn Fire ON";
+            flameMat.opacity = 0;
+            fireLight.intensity = 0;
+        }
+        updateRecipePrompt();
+    }
+
+    function useSlot(slotIdx) {
+        if (!state.fireOn && state.temp < 15) {
+            showToast("Turn on the Stove Fire first! 🔥");
+            return;
+        }
+
+        const stepCfg = state.currentRecipe.steps[slotIdx];
+        state.usedSlots[slotIdx] = true;
+        document.getElementById(`btn-slot-${slotIdx}`).disabled = true;
+
+        if (stepCfg.type === 'oil' || stepCfg.type === 'hot_oil') {
+            state.hasOil = true;
+            oilPool.visible = true;
+            oilMat.color.setHex(stepCfg.liquidColor || 0xffd54f);
+            state.oilTargetScale = 1.0;
+            for (let i = 0; i < 6; i++) spawnSmoke(0);
+            showToast(`${stepCfg.label} Poured! 🫗`);
+        } else if (stepCfg.type === 'sauce') {
+            state.hasSauce = true;
+            oilPool.visible = true;
+            state.oilTargetScale = 1.0;
+            oilMat.color.setHex(stepCfg.sauceColor);
+            for (let i = 0; i < 10; i++) spawnSmoke(0);
+            showToast(`${stepCfg.label} Added! 🔥`);
+        } else {
+            const count = stepCfg.count || 10;
+            for (let i = 0; i < count; i++) {
+                const { group, colorMesh } = build3DFoodModel(stepCfg.type);
+                group.traverse(child => { if (child.isMesh) child.castShadow = true; });
+
+                if (stepCfg.type === 'whole_fish') {
+                    group.position.set(0, 3.2, 0);
+                } else if (stepCfg.type === 'sunny_egg') {
+                    const angle = (i / count) * Math.PI * 2;
+                    group.position.set(Math.cos(angle) * 0.75, 3.2 + i * 0.3, Math.sin(angle) * 0.75);
+                } else {
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = Math.random() * 1.3;
+                    group.position.set(Math.cos(angle) * dist, 3.5 + Math.random() * 1.4, Math.sin(angle) * dist);
+                    group.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+                }
+
+                wokGroup.add(group);
+                state.ingredients.push({
+                    type: stepCfg.type,
+                    group: group,
+                    colorMesh: colorMesh,
+                    vy: 0,
+                    baseY: stepCfg.type === 'whole_fish' ? 0.25 : (0.12 + Math.random() * 0.2),
+                    cooked: 0
+                });
+            }
+            showToast(`${stepCfg.label} Added!`);
+        }
+
+        if (stepCfg.unlockServe) {
+            document.getElementById('btn-serve').disabled = false;
+        }
+        if (state.stepIndex === slotIdx) state.stepIndex++;
+        updateRecipePrompt();
+    }
+
+    function tossWok() {
+        if (state.mode !== 'kitchen') return;
+        state.wokTossAnim = 1.0;
+
+        if (state.temp > 35) {
+            for (let i = 0; i < 5; i++) spawnSmoke(0);
+        }
+
+        state.ingredients.forEach(item => {
+            if (item.type === 'whole_fish') {
+                item.vy = 0.06;
+            } else {
+                item.vy = 0.16 + Math.random() * 0.11;
+                const angle = Math.random() * Math.PI * 2;
+                const radius = Math.random() * 1.3;
+                item.targetX = Math.cos(angle) * radius;
+                item.targetZ = Math.sin(angle) * radius;
+            }
+
+            if (state.temp > 25) {
+                item.cooked = Math.min(1.5, item.cooked + 0.25);
+                updateFoodColor(item);
+            }
+        });
+
+        if (state.ingredients.length > 0 && state.temp > 25) {
+            state.cookProgress = Math.min(150, state.cookProgress + 20);
+            cookBar.style.width = Math.min(100, state.cookProgress) + '%';
+
+            if (state.cookProgress > 125) {
+                cookBar.style.backgroundColor = '#d32f2f';
+                showToast("⚠️ Careful! Overcooking!");
+            }
+        }
+        updateRecipePrompt();
+    }
+
+    function updateFoodColor(item) {
+        if (!item.colorMesh) return;
+        if (item.cooked > 1.3) {
+            item.colorMesh.material.color.setHex(0x222222);
+            return;
+        }
+        const p = Math.min(1.0, item.cooked);
+        if (item.type === 'peppers') {
+            item.colorMesh.material.color.copy(new THREE.Color(0x4caf50).lerp(new THREE.Color(0x33691e), p));
+        } else if (item.type === 'pork') {
+            const target = state.hasSauce ? 0x6d3b1e : 0xd7ccc8;
+            item.colorMesh.material.color.copy(new THREE.Color(0xff8a80).lerp(new THREE.Color(target), p));
+        } else if (item.type === 'crispy_pork') {
+            const target = state.hasSauce ? 0xc62828 : 0xffa000;
+            item.colorMesh.material.color.copy(new THREE.Color(0xffcc80).lerp(new THREE.Color(target), p));
+        } else if (item.type === 'whole_fish') {
+            item.colorMesh.material.color.copy(new THREE.Color(0xb0bec5).lerp(new THREE.Color(0xf5f5f5), p));
+        }
+    }
+
+    function updateRecipePrompt() {
+        if (!state.fireOn && state.temp < 20) {
+            promptEl.innerText = "Step 1: Tap 'Turn Fire ON' to heat up the wok!";
+            return;
+        }
+        const steps = state.currentRecipe.steps;
+        for (let i = 0; i < steps.length; i++) {
+            if (!state.usedSlots[i]) {
+                promptEl.innerText = steps[i].prompt;
+                return;
+            }
+        }
+        if (state.cookProgress < 80) {
+            promptEl.innerText = `Keep tapping '${state.currentRecipe.actionLabel}' until Doneness reaches 80-100%!`;
+        } else {
+            promptEl.innerText = "✨ Dish is ready! Tap '6. Serve Dish!' to bring it to the customer!";
+        }
+    }
+
+    // --- STAGE 3: SERVING & CUSTOMER REVIEW ---
+    function serveDish() {
+        state.mode = 'dining';
+        state.fireOn = false;
+        state.patienceEndsAt = 0;
+        document.getElementById('patience-row').style.display = 'none';
+        flameMat.opacity = 0;
+        fireLight.intensity = 0;
+
+        document.getElementById('kitchen-controls').classList.add('hidden');
+        document.getElementById('kitchen-bars').style.display = 'none';
+        promptEl.innerText = "Serving dish to customer table...";
+
+        state.ingredients.forEach((item, idx) => {
+            wokGroup.remove(item.group);
+            plateGroup.add(item.group);
+            if (item.type === 'whole_fish') {
+                item.group.position.set(0, 0.22, 0);
+                item.group.rotation.set(0, 0.2, 0);
+            } else if (item.type === 'sunny_egg') {
+                const angle = (idx / 3) * Math.PI * 2;
+                item.group.position.set(Math.cos(angle) * 0.45, 0.22, Math.sin(angle) * 0.45);
+                item.group.rotation.set(0, 0, 0);
+            } else {
+                const angle = Math.random() * Math.PI * 2;
+                const dist = Math.random() * 1.05;
+                item.group.position.set(Math.cos(angle) * dist, 0.16 + Math.random() * 0.18, Math.sin(angle) * dist);
+            }
+            item.vy = 0;
+            item.targetX = undefined;
+            item.targetZ = undefined;
+        });
+
+        plateSauce.visible = state.hasSauce || state.hasOil;
+        plateSauceMat.color.copy(oilMat.color);
+
+        for (let i = 0; i < 6; i++) spawnSmoke(18);
+
+        const r = state.currentRecipe;
+        state.customerReaction = 'eating';
+        document.getElementById('cust-avatar').innerText = '🥢';
+        document.getElementById('cust-name').innerText = r.customer.name;
+        document.getElementById('cust-status').innerText = `Tasting your ${r.name}...`;
+        document.getElementById('review-stars').innerText = '🥢 🍚 😋';
+        document.getElementById('review-text').innerText = '"Let me take a bite..."';
+        document.getElementById('score-tags').innerHTML = '';
+        document.getElementById('btn-go-payment').disabled = true;
+
+        document.getElementById('review-modal').classList.add('show');
+        reviewTimer = setTimeout(evaluateCustomerReview, 1800);
+    }
+
+    function evaluateCustomerReview() {
+        const r = state.currentRecipe;
+        let stars = 5;
+        let comments = [];
+        let tags = [];
+
+        if (!state.hasOil) {
+            stars -= 2;
+            comments.push("You didn't put any cooking oil/liquid! Everything stuck to the dry wok!");
+            tags.push({ text: "❌ Forgot Oil", color: "#d32f2f" });
+        } else {
+            tags.push({ text: "✅ Sizzling Oil", color: "#388e3c" });
+        }
+
+        const missingCount = state.usedSlots.filter(u => !u).length;
+        if (missingCount > 0) {
+            stars -= Math.min(2, missingCount);
+            comments.push(`You missed ${missingCount} ingredient(s) from the recipe!`);
+            tags.push({ text: `⚠️ Missing ${missingCount} Item(s)`, color: "#f57c00" });
+        } else {
+            tags.push({ text: "✅ Complete Recipe", color: "#388e3c" });
+        }
+
+        if (state.cookProgress < 60) {
+            stars -= 2;
+            comments.push("It's undercooked! Stir-fry it longer next time!");
+            tags.push({ text: "❌ Undercooked", color: "#d32f2f" });
+        } else if (state.cookProgress > 125) {
+            stars -= 2;
+            comments.push("Cough! You burned it! Serve it as soon as it hits 100%!");
+            tags.push({ text: "❌ Burnt", color: "#d32f2f" });
+        } else {
+            tags.push({ text: "🏆 Master Doneness", color: "#1976d2" });
+        }
+
+        stars = Math.max(1, Math.min(5, stars));
+        state.lastStars = stars;
+
+        if (stars === 5) {
+            comments.push(r.praise);
+        } else if (stars === 4 && comments.length === 0) {
+            comments.push("Very delicious! Almost 5-star perfection!");
+        }
+
+        state.pendingPay = estimatePayout(r, stars, state.streak);
+
+        document.getElementById('review-stars').innerText = '⭐'.repeat(stars) + '☆'.repeat(5 - stars);
+        document.getElementById('review-text').innerText = `"${comments.join(' ')}"`;
+        document.getElementById('cust-status').innerText = `Rated ${stars}.0 / 5.0 Stars • Bill: ¥${state.pendingPay.total}`;
+
+        if (stars >= 4) {
+            state.customerReaction = 'happy';
+            document.getElementById('cust-avatar').innerText = '🤩';
+            mouthMesh.rotation.z = Math.PI;
+        } else if (stars === 3) {
+            state.customerReaction = 'neutral';
+            document.getElementById('cust-avatar').innerText = '🤔';
+            mouthMesh.rotation.z = Math.PI;
+        } else {
+            state.customerReaction = 'sad';
+            document.getElementById('cust-avatar').innerText = '🤢';
+            mouthMesh.rotation.z = 0;
+        }
+
+        document.getElementById('score-tags').innerHTML = tags
+            .map(t => `<span class="score-tag" style="background:${t.color}">${t.text}</span>`)
+            .join('');
+
+        // Customer ate the food—clear food chunks leaving dirty sauce on the plate
+        state.ingredients.forEach(item => plateGroup.remove(item.group));
+        state.ingredients = [];
+        document.getElementById('btn-go-payment').disabled = false;
+    }
+
+    // --- STAGE 4: CASHIER PAYMENT (COLLECT CASH OR ACCEPT CARD) ---
+    function goToPaymentPhase() {
+        document.getElementById('review-modal').classList.remove('show');
+        state.mode = 'cashier';
+
+        // Randomly decide whether customer pays by Cash or Credit Card
+        state.paymentMethod = Math.random() > 0.5 ? 'cash' : 'card';
+        state.paymentAnim = 0;
+        state.pendingOrderId = crypto.randomUUID();
+
+        cashNotesGroup.visible = (state.paymentMethod === 'cash');
+        cashNotesGroup.position.set(1.2, 0.25, 0.6);
+        cardPaymentGroup.visible = (state.paymentMethod === 'card');
+        creditCardMesh.position.set(0.6, 0.65, 0.3);
+
+        document.getElementById('hud-dish-title').innerText = `💳 Cashier Checkout (收银台)`;
+        promptEl.innerText = state.paymentMethod === 'cash'
+            ? "Tap the 3D Cash Banknotes or the button below to collect payment!"
+            : "Tap the 3D Credit Card / POS Terminal to process card payment!";
+
+        document.getElementById('pay-dish-name').innerText = state.currentRecipe.name;
+        document.getElementById('pay-rating-bonus').innerText = payoutSummary(state.pendingPay);
+        document.getElementById('pay-amount').innerText = `¥${state.pendingPay.total}`;
+
+        const btn = document.getElementById('btn-collect-pay');
+        btn.disabled = false;
+        if (state.paymentMethod === 'cash') {
+            document.getElementById('pay-icon').innerText = '💵';
+            document.getElementById('pay-subtitle').innerText = `${state.currentRecipe.customer.name} is paying with Cash (现金)`;
+            btn.innerText = `💵 Collect Cash ¥${state.pendingPay.total} (收取现金)`;
+        } else {
+            document.getElementById('pay-icon').innerText = '💳';
+            document.getElementById('pay-subtitle').innerText = `${state.currentRecipe.customer.name} is paying by Credit Card (刷卡)`;
+            btn.innerText = `💳 Accept Card Payment ¥${state.pendingPay.total} (确认刷卡)`;
+        }
+
+        document.getElementById('payment-modal').classList.add('show');
+    }
+
+    async function collectPayment() {
+        document.getElementById('btn-collect-pay').disabled = true;
+        state.paymentAnim = 1.0;
+
+        let pay = state.pendingPay;
+        let saved = null;
+        if (isSignedIn()) {
+            saved = await submitOrder(state.pendingOrderId, state.currentRecipe.id, state.lastStars);
+            if (saved) pay = saved;
+            applyServerResult(saved);
+        }
+        state.streak = pay.streak;
+        state.earnings += pay.total;
+        document.getElementById('hud-earnings').innerText = `💰 ¥${state.earnings}`;
+        updateStreakBadge();
+
+        const unsaved = isSignedIn() && !saved ? ' (not saved)' : '';
+        showToast(`+¥${pay.total} Collected!${unsaved} 💰`);
+
+        payTimer = setTimeout(() => {
+            document.getElementById('payment-modal').classList.remove('show');
+            goToDishwashingPhase();
+        }, 1100);
+    }
+
+    // --- STAGE 5: DISHWASHING SINK MINI-GAME ---
+    function goToDishwashingPhase() {
+        state.mode = 'sink';
+        state.washProgress = 0;
+
+        // Hide plate on dining table and show dirty stained plate inside the sink
+        plateGroup.visible = false;
+        sinkStainMat.opacity = 0.9;
+        sinkStainMat.color.copy(plateSauceMat.color);
+
+        document.getElementById('hud-dish-title').innerText = `🧽 Dishwashing Sink (洗碗池)`;
+        promptEl.innerText = "Swipe back & forth on the dirty plate or tap 'Scrub & Rinse' until 100% clean!";
+
+        document.getElementById('wash-bar').style.width = '0%';
+        document.getElementById('btn-scrub').disabled = false;
+        document.getElementById('btn-finish-order').disabled = true;
+        document.getElementById('wash-modal').classList.add('show');
+    }
+
+    function scrubDish() {
+        if (state.mode !== 'sink' || state.washProgress >= 100) return;
+
+        state.washProgress = Math.min(100, state.washProgress + 25);
+        state.spongeAnim = 1.0;
+
+        document.getElementById('wash-bar').style.width = state.washProgress + '%';
+        sinkStainMat.opacity = 0.9 * (1 - state.washProgress / 100);
+
+        for (let i = 0; i < 6; i++) spawnSmoke(50, true);
+
+        if (state.washProgress >= 100) {
+            showToast("✨ Plate Sparkling Clean! Ready for Next Order!");
+            document.getElementById('btn-scrub').disabled = true;
+            document.getElementById('btn-finish-order').disabled = false;
+            promptEl.innerText = "✨ Plate is sparkling clean! Tap 'Next Customer!' to seat a new guest!";
+        } else {
+            showToast(`Scrubbing... ${state.washProgress}% 🫧`);
+        }
+    }
+
+    function finishWashAndNextOrder() {
+        document.getElementById('wash-modal').classList.remove('show');
+        openShopAndSeatCustomer();
+    }
+
+    function closeShop() {
+        clearWokAndPlate();
+        state.mode = 'lobby';
+
+        ['waiter-modal', 'review-modal', 'payment-modal', 'wash-modal'].forEach(id => {
+            document.getElementById(id).classList.remove('show');
+        });
+        document.getElementById('kitchen-controls').classList.add('hidden');
+        document.getElementById('top-hud').style.opacity = '0';
+        document.getElementById('top-hud').style.pointerEvents = 'none';
+        document.getElementById('shop-modal').classList.remove('hidden');
+    }
+
+    // =====================================================
+    // 5b. ACCOUNT, LEADERBOARD, STREAK, PATIENCE
+    // =====================================================
+    const PATIENCE_MS = 90000;
+    const STREAK_TIERS = [{ streak: 6, multiplier: 0.2 }, { streak: 3, multiplier: 0.1 }];
+    const TIP_RATE = 0.1;
+    let reviewTimer = null, payTimer = null, walkTimer = null;
+
+    const textEl = (tag, text, cls) => {
+        const el = document.createElement(tag);
+        el.textContent = text;
+        if (cls) el.className = cls;
+        return el;
+    };
+    const postJSON = (path, body) => fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(6000)
+    });
+    const isSignedIn = () => !!state.user && !state.user.needsNickname;
+
+    function estimatePayout(recipe, stars, streak) {
+        if (stars === 0) return { base: 0, bonus: 0, tip: 0, total: 0, streak: 0 };
+        const base = Math.round(recipe.price * stars / 5);
+        const nextStreak = stars >= 4 ? streak + 1 : 0;
+        const tier = STREAK_TIERS.find(t => nextStreak >= t.streak);
+        const bonus = tier ? Math.round(base * tier.multiplier) : 0;
+        const tip = stars === 5 ? Math.round(recipe.price * TIP_RATE) : 0;
+        return { base, bonus, tip, total: base + bonus + tip, streak: nextStreak };
+    }
+
+    function payoutSummary(pay) {
+        let s = `Base ¥${pay.base}`;
+        if (pay.bonus) s += ` · Streak +¥${pay.bonus}`;
+        if (pay.tip) s += ` · Tip +¥${pay.tip}`;
+        return s;
+    }
+
+    function updateStreakBadge() {
+        const el = document.getElementById('hud-streak');
+        const tier = STREAK_TIERS.find(t => state.streak >= t.streak);
+        el.textContent = `🔥 Streak ${state.streak}${tier ? ` (+${Math.round(tier.multiplier * 100)}%)` : ''}`;
+        el.classList.toggle('on', state.streak > 0);
+    }
+
+    function tickPatience() {
+        if (!state.patienceEndsAt) return;
+        const left = state.patienceEndsAt - Date.now();
+        const bar = document.getElementById('patience-bar');
+        bar.style.width = Math.max(0, left / PATIENCE_MS * 100) + '%';
+        bar.classList.toggle('low', left < PATIENCE_MS * 0.25);
+        if (left <= 0) customerWalksOut();
+    }
+
+    function customerWalksOut() {
+        state.patienceEndsAt = 0;
+        state.streak = 0;
+        updateStreakBadge();
+        if (isSignedIn()) submitOrder(crypto.randomUUID(), state.currentRecipe.id, 0).then(applyServerResult);
+        document.getElementById('kitchen-controls').classList.add('hidden');
+        document.getElementById('kitchen-bars').style.display = 'none';
+        clearWokAndPlate();
+        state.mode = 'dining';
+        showToast('😠 The customer walked out!');
+        walkTimer = setTimeout(goToDishwashingPhase, 1500);
+    }
+
+    async function submitOrder(orderId, dishId, stars) {
+        try {
+            const r = await postJSON('/api/scores/order', { orderId, dishId, stars });
+            return r.ok ? await r.json() : null;
+        } catch {
+            return null;
+        }
+    }
+
+    function applyServerResult(saved) {
+        if (!saved || !state.user) return;
+        state.user.totalEarnings = saved.totalEarnings;
+        state.user.rank = saved.rank;
+        renderAccount();
+        loadLeaderboard();
+    }
+
+    function renderAccount() {
+        const box = document.getElementById('account-box');
+        const who = box.querySelector('.who');
+        const slot = document.getElementById('google-signin-slot');
+        let out = document.getElementById('account-logout');
+        if (!state.user) {
+            out?.remove();
+            slot.style.display = '';
+            who.replaceChildren(textEl('b', 'Guest'), textEl('small', 'Sign in to save earnings & join the leaderboard'));
+            return;
+        }
+        slot.style.display = 'none';
+        if (!out) {
+            out = textEl('button', 'Sign out', 'btn-logout');
+            out.id = 'account-logout';
+            out.onclick = signOut;
+            box.appendChild(out);
+        }
+        if (state.user.needsNickname) {
+            who.replaceChildren(textEl('b', 'Pick a nickname'), textEl('small', 'Needed to join the leaderboard'));
+        } else {
+            who.replaceChildren(
+                textEl('b', state.user.nickname),
+                textEl('small', `Lifetime ¥${state.user.totalEarnings} · Rank #${state.user.rank}`)
+            );
+        }
+    }
+
+    async function loadMe() {
+        try {
+            const r = await fetch('/api/auth/me');
+            state.user = r.ok ? await r.json() : null;
+        } catch {
+            state.user = null;
+        }
+        renderAccount();
+        if (state.user?.needsNickname) openNickModal();
+    }
+
+    async function onGoogleCredential(resp) {
+        try {
+            const r = await postJSON('/api/auth/google', { credential: resp.credential });
+            if (!r.ok) {
+                showToast('Sign-in failed');
+                return;
+            }
+        } catch {
+            showToast('Sign-in failed');
+            return;
+        }
+        await loadMe();
+    }
+
+    async function signOut() {
+        await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+        state.user = null;
+        renderAccount();
+    }
+
+    async function initGoogle() {
+        let cfg = null;
+        try {
+            cfg = await (await fetch('/api/config')).json();
+        } catch {}
+        if (!cfg?.googleClientId) return;
+        for (let i = 0; i < 50 && !window.google?.accounts?.id; i++) {
+            await new Promise(res => setTimeout(res, 200));
+        }
+        if (!window.google?.accounts?.id) return;
+        google.accounts.id.initialize({ client_id: cfg.googleClientId, callback: onGoogleCredential });
+        google.accounts.id.renderButton(document.getElementById('google-signin-slot'), {
+            theme: 'filled_black', size: 'medium', shape: 'pill'
+        });
+    }
+
+    function openNickModal() {
+        document.getElementById('shop-modal').classList.add('hidden');
+        document.getElementById('nick-error').textContent = '';
+        document.getElementById('nick-modal').classList.remove('hidden');
+    }
+
+    async function saveNickname() {
+        const err = document.getElementById('nick-error');
+        const btn = document.getElementById('btn-nick-save');
+        btn.disabled = true;
+        try {
+            const r = await postJSON('/api/auth/nickname', { nickname: document.getElementById('nick-input').value });
+            if (!r.ok) {
+                const body = await r.json().catch(() => ({}));
+                err.textContent = body.error || 'Could not save nickname';
+                return;
+            }
+            err.textContent = '';
+            document.getElementById('nick-modal').classList.add('hidden');
+            document.getElementById('shop-modal').classList.remove('hidden');
+            await loadMe();
+            loadLeaderboard();
+        } catch {
+            err.textContent = 'Network error, try again';
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function loadLeaderboard() {
+        const body = document.getElementById('leaderboard-body');
+        try {
+            const r = await fetch('/api/leaderboard', { signal: AbortSignal.timeout(4000) });
+            if (!r.ok) throw new Error('bad status');
+            const rows = await r.json();
+            if (rows.length === 0) {
+                body.replaceChildren(textEl('span', 'No players yet, be the first!', 'muted'));
+                return;
+            }
+            const ol = document.createElement('ol');
+            rows.forEach(row => {
+                const li = document.createElement('li');
+                li.append(textEl('span', row.nickname), textEl('span', `¥${row.totalEarnings}`));
+                ol.appendChild(li);
+            });
+            body.replaceChildren(ol);
+        } catch {
+            body.replaceChildren(textEl('span', 'Leaderboard unavailable', 'muted'));
+        }
+    }
+
+    // Touch & Swipe Support for Wok Tossing, Cashier Tap, and Dish Scrubbing
+    let touchStartX = 0, touchStartY = 0;
+    container.addEventListener('touchstart', e => {
+        touchStartX = e.touches[0].clientX;
+        touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+
+    container.addEventListener('touchend', e => {
+        const dx = touchStartX - e.changedTouches[0].clientX;
+        const dy = touchStartY - e.changedTouches[0].clientY;
+        const dist = Math.hypot(dx, dy);
+
+        if (state.mode === 'kitchen' && dist > 30) {
+            tossWok();
+        } else if (state.mode === 'sink' && dist > 20) {
+            scrubDish();
+        } else if (state.mode === 'cashier' && !document.getElementById('btn-collect-pay').disabled) {
+            collectPayment();
+        }
+    }, { passive: true });
+
+    // =====================================================
+    // 6. MAIN ANIMATION LOOP
+    // =====================================================
+    let clock = 0;
+    function animate() {
+        requestAnimationFrame(animate);
+        clock += 0.06;
+
+        // Smooth Camera Transition between all 5 Restaurant Stations
+        const view = CAM_VIEWS[state.mode] || CAM_VIEWS.lobby;
+        currentCamPos.lerp(view.pos, 0.06);
+        currentLookAt.lerp(view.look, 0.06);
+        camera.position.copy(currentCamPos);
+        camera.lookAt(currentLookAt);
+
+        if (state.mode === 'kitchen') {
+            tickPatience();
+            if (state.fireOn) {
+                state.temp = Math.min(100, state.temp + 0.35);
+                if (Math.random() < 0.08 && state.temp > 60) spawnSmoke(0);
+            } else {
+                state.temp = Math.max(0, state.temp - 0.25);
+            }
+            tempBar.style.width = state.temp + '%';
+
+            if ((state.hasOil || state.hasSauce) && oilPool.scale.x < state.oilTargetScale) {
+                oilPool.scale.x += 0.04;
+                oilPool.scale.y += 0.04;
+            }
+
+            if (state.wokTossAnim > 0) {
+                state.wokTossAnim -= 0.06;
+                const angle = Math.sin(state.wokTossAnim * Math.PI * 2) * 0.22;
+                wokGroup.rotation.z = angle;
+                wokGroup.position.y = Math.sin(state.wokTossAnim * Math.PI) * 0.35;
+                spatulaGroup.position.x = Math.sin(state.wokTossAnim * Math.PI * 4) * 1.1;
+                spatulaGroup.rotation.z = -0.7 + Math.cos(state.wokTossAnim * Math.PI * 2) * 0.4;
+            } else {
+                wokGroup.rotation.z = 0;
+                wokGroup.position.y = 0;
+            }
+
+            state.ingredients.forEach(item => {
+                item.group.position.y += item.vy;
+                item.vy -= 0.012;
+
+                if (item.targetX !== undefined) {
+                    item.group.position.x += (item.targetX - item.group.position.x) * 0.1;
+                    item.group.position.z += (item.targetZ - item.group.position.z) * 0.1;
+                }
+
+                if (item.group.position.y <= item.baseY) {
+                    item.group.position.y = item.baseY;
+                    item.vy = 0;
+                    if (item.type === 'whole_fish' || item.type === 'sunny_egg') {
+                        item.group.rotation.x = 0;
+                        item.group.rotation.z = 0;
+                    }
+                } else if (item.type !== 'whole_fish' && item.type !== 'sunny_egg') {
+                    item.group.rotation.x += 0.12;
+                    item.group.rotation.z += 0.12;
+                }
+
+                if (state.temp > 50 && item.vy === 0) {
+                    item.group.position.x += (Math.random() - 0.5) * 0.012;
+                    item.group.position.z += (Math.random() - 0.5) * 0.012;
+                }
+            });
+        } else if (state.mode === 'dining') {
+            if (state.customerReaction === 'waiting') {
+                headGroup.rotation.y = Math.sin(clock * 1.5) * 0.15;
+                headGroup.rotation.x = 0;
+            } else if (state.customerReaction === 'eating') {
+                armGroup.rotation.x = Math.sin(clock * 2.5) * 0.35;
+                headGroup.rotation.x = Math.sin(clock * 5) * 0.08;
+                headGroup.rotation.y = 0;
+            } else if (state.customerReaction === 'happy') {
+                headGroup.rotation.x = Math.sin(clock * 4) * 0.22;
+                headGroup.rotation.y = 0;
+                customerGroup.position.y = Math.abs(Math.sin(clock * 3)) * 0.15;
+                armGroup.rotation.x = Math.sin(clock * 2) * 0.2;
+            } else if (state.customerReaction === 'sad') {
+                headGroup.rotation.y = Math.sin(clock * 4) * 0.3;
+                headGroup.rotation.x = 0.15;
+                customerGroup.position.y = 0;
+            }
+        } else if (state.mode === 'cashier') {
+            if (state.paymentAnim > 0) {
+                state.paymentAnim = Math.max(0, state.paymentAnim - 0.04);
+                if (state.paymentMethod === 'cash') {
+                    // Cash bills fly into the register drawer
+                    cashNotesGroup.position.x = THREE.MathUtils.lerp(1.2, -1.2, 1 - state.paymentAnim);
+                    cashNotesGroup.position.y = 0.25 + Math.sin(state.paymentAnim * Math.PI) * 0.8;
+                } else {
+                    // Credit card taps onto the POS reader
+                    creditCardMesh.position.x = Math.sin(state.paymentAnim * Math.PI * 2) * 0.5;
+                    creditCardMesh.position.y = 0.35;
+                }
+            }
+        } else if (state.mode === 'sink') {
+            if (state.spongeAnim > 0) {
+                state.spongeAnim = Math.max(0, state.spongeAnim - 0.06);
+                spongeGroup.position.x = Math.cos(clock * 6) * 0.75;
+                spongeGroup.position.z = Math.sin(clock * 6) * 0.75;
+                spongeGroup.position.y = 0.32;
+            } else {
+                spongeGroup.position.set(1.3, 0.5, 0.6);
+            }
+        }
+
+        // Update Smoke & Soap Bubble Particles
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.mesh.position.y += p.isBubble ? 0.035 : 0.05;
+            p.mesh.scale.multiplyScalar(1.015);
+            p.life -= 0.022;
+            p.mesh.material.opacity = p.life * (p.isBubble ? 0.7 : 0.35);
+            if (p.life <= 0) {
+                scene.remove(p.mesh);
+                particles.splice(i, 1);
+            }
+        }
+
+        renderer.render(scene, camera);
+    }
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    initGoogle();
+    loadMe();
+    loadLeaderboard();
+    updateStreakBadge();
+    animate();
+</script>
+</body>
+</html>

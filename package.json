@@ -1,0 +1,11 @@
+{
+  "name": "cooking-game",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "google-auth-library": "^9.14.2",
+    "jose": "^5.9.3",
+    "pg": "^8.13.1"
+  }
+}
