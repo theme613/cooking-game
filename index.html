@@ -291,6 +291,7 @@
             </button>
         </div>
         <div id="online-panel" style="display:none;">
+            <select id="dish-select" class="nick-input" style="margin: 0 0 8px;"></select>
             <button class="btn-primary-gold" onclick="postOnlineOrder()">🧾 Post an Order (下单)</button>
             <div class="ticket-board" id="ticket-board"><span class="muted">Sign in to play online.</span></div>
         </div>
@@ -1403,11 +1404,40 @@
         // Customer ate the food—clear food chunks leaving dirty sauce on the plate
         state.ingredients.forEach(item => plateGroup.remove(item.group));
         state.ingredients = [];
+        if (onlineTicket?.role === 'chef') {
+            submitChefReview(stars);
+            return;
+        }
         document.getElementById('btn-go-payment').disabled = false;
+    }
+
+    async function submitChefReview(stars) {
+        const btn = document.getElementById('btn-go-payment');
+        try {
+            const r = await postJSON(`/api/tickets/${onlineTicket.id}/review`, { stars });
+            if (!r.ok) {
+                showToast('Could not send review');
+                btn.disabled = false;
+                return;
+            }
+            document.getElementById('review-modal').classList.remove('show');
+            onlineTicket = null;
+            state.mode = 'lobby';
+            document.getElementById('kitchen-controls').classList.add('hidden');
+            document.getElementById('top-hud').style.opacity = '0';
+            document.getElementById('top-hud').style.pointerEvents = 'none';
+            document.getElementById('shop-modal').classList.remove('hidden');
+            showToast('Dish served! Waiting for the customer to pay 💰');
+            refreshBoard();
+        } catch {
+            showToast('Connection lost');
+            btn.disabled = false;
+        }
     }
 
     // --- STAGE 4: CASHIER PAYMENT (COLLECT CASH OR ACCEPT CARD) ---
     function goToPaymentPhase() {
+        if (onlineTicket) return;
         document.getElementById('review-modal').classList.remove('show');
         state.mode = 'cashier';
 
@@ -1742,9 +1772,18 @@
         }
     }
 
+    function fillDishPicker() {
+        const sel = document.getElementById('dish-select');
+        sel.replaceChildren(...RECIPE_KEYS.map(k => {
+            const o = document.createElement('option');
+            o.value = k;
+            o.textContent = `${RECIPES[k].name} · ¥${RECIPES[k].price}`;
+            return o;
+        }));
+    }
+
     async function postOnlineOrder() {
-        const choices = RECIPE_KEYS.map(k => `${RECIPES[k].id}`);
-        const dishId = choices[Math.floor(Math.random() * choices.length)];
+        const dishId = document.getElementById('dish-select').value;
         try {
             const r = await postJSON('/api/tickets', { dishId });
             if (!r.ok) {
@@ -1771,6 +1810,24 @@
                 return;
             }
             startOnlineRole(id, role, dishId);
+        } catch {
+            showToast('Connection lost');
+        }
+    }
+
+    async function confirmTicket(id) {
+        try {
+            const r = await postJSON(`/api/tickets/${id}/confirm`, {});
+            if (r.status === 409) {
+                showToast('Already confirmed');
+            } else if (!r.ok) {
+                showToast('Could not confirm');
+            } else {
+                const data = await r.json();
+                showToast(`Paid ¥${data.total} to the team 💰`);
+                loadMe();
+            }
+            refreshBoard();
         } catch {
             showToast('Connection lost');
         }
@@ -1812,7 +1869,11 @@
         const label = RECIPES[t.dishId]?.name || t.dishId;
         row.appendChild(textEl('span', `${t.customerName}: ${label} · ${t.status}`));
 
-        if (t.status === 'open' && !t.isMine) {
+        if (t.status === 'served' && t.isMine) {
+            const b = textEl('button', `Confirm ★${t.stars}`, 'btn-primary-green');
+            b.onclick = () => confirmTicket(t.id);
+            row.appendChild(b);
+        } else if (t.status === 'open' && !t.isMine) {
             const b = textEl('button', 'Take as Waiter', 'btn-primary-gold');
             b.onclick = () => takeTicket(t.id, 'waiter', t.dishId);
             row.appendChild(b);
@@ -2023,6 +2084,7 @@
     initGoogle();
     loadMe();
     loadLeaderboard();
+    fillDishPicker();
     updateStreakBadge();
     animate();
 </script>
