@@ -208,6 +208,17 @@
         }
         .nick-error { color: #ff8a80; font-size: 0.8rem; min-height: 1em; margin-top: 6px; }
 
+        /* Online mode */
+        .mode-toggle { display: flex; gap: 6px; margin: 8px 0; }
+        .mode-btn { flex: 1; background: #2e2e36; padding: 8px; font-size: 0.82rem; }
+        .mode-btn.active { background: linear-gradient(135deg, #ff6d00, #ffab40); color: #111; }
+        .ticket-board { text-align: left; margin-top: 10px; font-size: 0.8rem; }
+        .ticket-row {
+            display: flex; justify-content: space-between; align-items: center; gap: 8px;
+            background: rgba(255,255,255,0.07); border-radius: 10px; padding: 8px 10px; margin-bottom: 6px;
+        }
+        .ticket-row button { width: auto; padding: 6px 10px; margin: 0; font-size: 0.75rem; }
+
         /* Streak & patience */
         .stats-badge.streak { display: none; }
         .stats-badge.streak.on { display: inline-block; }
@@ -270,9 +281,19 @@
             <div class="menu-card"><span>🍅</span><div><b>番茄炒蛋</b><br><small>¥30 • Tomato Egg</small></div></div>
             <div class="menu-card"><span>🍳</span><div><b>叉烧煎蛋</b><br><small>¥42 • Char Siu Egg</small></div></div>
         </div>
-        <button class="btn-primary-green" onclick="openShopAndSeatCustomer()">
-            🔓 Open Shop & Seat Customer (开门迎客)
-        </button>
+        <div class="mode-toggle" id="mode-toggle">
+            <button class="mode-btn active" id="mode-offline" onclick="setMode('offline')">🏠 Offline</button>
+            <button class="mode-btn" id="mode-online" onclick="setMode('online')">🌐 Online</button>
+        </div>
+        <div id="offline-panel">
+            <button class="btn-primary-green" onclick="openShopAndSeatCustomer()">
+                🔓 Open Shop & Seat Customer (开门迎客)
+            </button>
+        </div>
+        <div id="online-panel" style="display:none;">
+            <button class="btn-primary-gold" onclick="postOnlineOrder()">🧾 Post an Order (下单)</button>
+            <div class="ticket-board" id="ticket-board"><span class="muted">Sign in to play online.</span></div>
+        </div>
         <div class="leaderboard" id="leaderboard">
             <h4>🏆 Top Earners</h4>
             <div id="leaderboard-body"><span class="muted">Loading…</span></div>
@@ -1015,10 +1036,31 @@
             showToast(`Order Written: ${r.name}! 📝`);
             btn.innerText = "👨‍🍳 Head to Kitchen & Start Cooking! (进厨房炒菜)";
             btn.className = "btn-primary-green";
+        } else if (onlineTicket?.role === 'waiter') {
+            document.getElementById('waiter-modal').classList.remove('show');
+            waiterPadGroup.visible = false;
+            advanceOnlineTicket();
         } else {
             document.getElementById('waiter-modal').classList.remove('show');
             waiterPadGroup.visible = false;
             startCookingOrder();
+        }
+    }
+
+    async function advanceOnlineTicket() {
+        try {
+            const r = await postJSON(`/api/tickets/${onlineTicket.id}/advance`, {});
+            if (!r.ok) {
+                showToast('Could not hand off ticket');
+                return;
+            }
+            onlineTicket = null;
+            state.mode = 'lobby';
+            showToast('Order handed to the kitchen! 👨🍳');
+            document.getElementById('shop-modal').classList.remove('hidden');
+            refreshBoard();
+        } catch {
+            showToast('Connection lost');
         }
     }
 
@@ -1672,6 +1714,134 @@
             err.textContent = 'Network error, try again';
         } finally {
             btn.disabled = false;
+        }
+    }
+
+    let mode = 'offline';
+    let onlineTicket = null;
+    let boardTimer = null;
+    let boardFailures = 0;
+
+    function setMode(next) {
+        if (next === 'online' && !isSignedIn()) {
+            showToast('Sign in with a nickname to play online');
+            return;
+        }
+        mode = next;
+        document.getElementById('mode-offline').classList.toggle('active', next === 'offline');
+        document.getElementById('mode-online').classList.toggle('active', next === 'online');
+        document.getElementById('offline-panel').style.display = next === 'offline' ? '' : 'none';
+        document.getElementById('online-panel').style.display = next === 'online' ? '' : 'none';
+        clearInterval(boardTimer);
+        if (next === 'online') {
+            boardFailures = 0;
+            refreshBoard();
+            boardTimer = setInterval(() => {
+                if (document.visibilityState === 'visible') refreshBoard();
+            }, 1500);
+        }
+    }
+
+    async function postOnlineOrder() {
+        const choices = RECIPE_KEYS.map(k => `${RECIPES[k].id}`);
+        const dishId = choices[Math.floor(Math.random() * choices.length)];
+        try {
+            const r = await postJSON('/api/tickets', { dishId });
+            if (!r.ok) {
+                showToast('Could not post order');
+                return;
+            }
+            showToast(`Order posted: ${RECIPES[dishId].name}`);
+            refreshBoard();
+        } catch {
+            showToast('Connection lost');
+        }
+    }
+
+    async function takeTicket(id, role, dishId) {
+        try {
+            const r = await postJSON(`/api/tickets/${id}/take`, { role });
+            if (r.status === 409) {
+                showToast('Someone else took that ticket');
+                refreshBoard();
+                return;
+            }
+            if (!r.ok) {
+                showToast('Could not take ticket');
+                return;
+            }
+            startOnlineRole(id, role, dishId);
+        } catch {
+            showToast('Connection lost');
+        }
+    }
+
+    function startOnlineRole(id, role, dishId) {
+        onlineTicket = { id, role, dishId };
+        state.currentRecipe = RECIPES[dishId];
+        state.orderWritten = false;
+        document.getElementById('shop-modal').classList.add('hidden');
+        if (role === 'waiter') {
+            openWaiterForTicket(RECIPES[dishId]);
+        } else {
+            startCookingOrder();
+        }
+    }
+
+    function openWaiterForTicket(r) {
+        state.mode = 'dining';
+        document.getElementById('top-hud').style.opacity = '1';
+        document.getElementById('top-hud').style.pointerEvents = 'auto';
+        document.getElementById('kitchen-bars').style.display = 'none';
+        document.getElementById('hud-dish-title').innerText = `📝 Online • Waiter`;
+        promptEl.innerText = "Write down the customer's order on your waiter pad!";
+        document.getElementById('waiter-cust-name').innerText = r.customer.name;
+        document.getElementById('waiter-cust-avatar').innerText = '🙋♂️';
+        document.getElementById('notepad-title').innerText = `📝 Waiter Order Pad: [Blank]`;
+        document.getElementById('notepad-dialogue').innerText = r.customer.request;
+        const btn = document.getElementById('btn-waiter-action');
+        btn.innerText = "📝 Write Down Customer Order (记下菜单)";
+        btn.className = "btn-primary-gold";
+        document.getElementById('waiter-modal').classList.add('show');
+    }
+
+
+    function ticketRow(t) {
+        const row = document.createElement('div');
+        row.className = 'ticket-row';
+        const label = RECIPES[t.dishId]?.name || t.dishId;
+        row.appendChild(textEl('span', `${t.customerName}: ${label} · ${t.status}`));
+
+        if (t.status === 'open' && !t.isMine) {
+            const b = textEl('button', 'Take as Waiter', 'btn-primary-gold');
+            b.onclick = () => takeTicket(t.id, 'waiter', t.dishId);
+            row.appendChild(b);
+        } else if (t.status === 'ready_for_cook' && !t.isMine && !t.isMyWaiterTicket) {
+            const b = textEl('button', 'Cook it', 'btn-primary-green');
+            b.onclick = () => takeTicket(t.id, 'chef', t.dishId);
+            row.appendChild(b);
+        }
+        return row;
+    }
+
+    async function refreshBoard() {
+        const board = document.getElementById('ticket-board');
+        try {
+            const r = await fetch('/api/tickets', { signal: AbortSignal.timeout(4000) });
+            if (!r.ok) throw new Error('bad status');
+            const tickets = await r.json();
+            boardFailures = 0;
+            if (tickets.length === 0) {
+                board.replaceChildren(textEl('span', 'No open tickets right now.', 'muted'));
+                return;
+            }
+            board.replaceChildren(...tickets.map(ticketRow));
+        } catch {
+            boardFailures++;
+            if (boardFailures >= 3) {
+                clearInterval(boardTimer);
+                board.replaceChildren(textEl('span', 'Connection lost. Switch to Offline to keep playing.', 'muted'));
+            }
         }
     }
 
